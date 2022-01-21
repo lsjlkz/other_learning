@@ -1,0 +1,404 @@
+#!/usr/bin/env python
+# -*- coding:UTF-8 -*-
+# XRLAM(".")
+# ===============================================================================
+# Date:
+# Author: ShuJia.Liang
+# Desc:
+# ======================================================================================
+
+import math
+import random
+from PIL import ImageDraw, Image
+
+# EPSION = 1e-15
+
+
+class Point(object):
+	def __init__(self, x, y):
+		self.x = x
+		self.y = y
+		self.square = None
+
+	def __str__(self):
+		return "Point(%s, %s)" % (self.x, self.y)
+
+	def __sub__(self, other):
+		'''
+		两点欧氏距离
+		@param other:
+		@return:
+		'''
+		instance = Calculate.get_instance()
+		square = instance[(self.x - other.x, self.x - other.x)] + instance[(self.y - other.y, self.y - other.y)]
+		return math.sqrt(square)
+
+	def __eq__(self, other):
+		return tuple(self) == tuple(other)
+
+	def __lt__(self, other):
+		return self.x < other.x
+
+	def __iter__(self):
+		return (i for i in (self.x, self.y))
+
+	def get_square(self):
+		'''
+		xy平方和
+		@return:
+		'''
+		if self.square is None:
+			instance = Calculate.get_instance()
+			self.square = instance[(self.x, self.x)] + instance[(self.y, self.y)]
+		return self.square
+
+
+class Edge(object):
+	def __init__(self, p1, p2):
+		self.p1, self.p2 = sorted([p1, p2])
+		self.length = None
+
+	def __str__(self):
+		return "Edge(%s, %s)" % (self.p1, self.p2)
+
+	def __eq__(self, other):
+		return tuple(self) == tuple(other)
+
+	def __iter__(self):
+		return (i for i in (self.p1, self.p2))
+
+	def is_collinear(self, other):
+		p1 , p2 = self.p1, self.p2
+		r = Calculate.cal_3_determinant([1, p1.x, p1.y], [1, p2.x, p2.y], [1, other.x, other.y])
+		if r == 0:
+			return True
+		return False
+
+	def get_length(self):
+		if self.length is None:
+			instance = Calculate.get_instance()
+			self.length = self.p1 - self.p2
+		return self.length
+
+	def is_point_right(self, p):
+		p1 = self.p1
+		p2 = self.p2
+		res = Calculate.cal_3_determinant([p1.x, p1.y, 1], [p2.x, p2.y, 1], [p.x, p.y, 1])
+		if res == 0:
+			return 0
+		return 1 if res > 0 else -1
+
+class Triangle(object):
+	def __init__(self, p1, p2, p3):
+		self.p1, self.p2, self.p3 = sorted([p1, p2, p3])
+		self.line_list = [Edge(self.p1, self.p2), Edge(self.p2, self.p3), Edge(self.p3, self.p1)]
+		self.outer_circle = None
+
+	def __str__(self):
+		return "Triangle(%s, %s, %s)" % (self.p1, self.p2, self.p3)
+
+	def __contains__(self, item):
+		return item in (self.p1, self.p2, self.p3)
+
+	def __eq__(self, other):
+		return tuple(self) == tuple(other)
+
+	def __iter__(self):
+		return (i for i in (self.p1, self.p2, self.p3))
+
+	# 插入节点与可疑边形成的三角与可疑边的对点园内判断
+	@classmethod
+	def from_vertex_and_edge(cls, e, p):
+		'''
+		边与顶点组成三角，可以用判断可疑边是否合法，调用is_point_inner_triangle
+		@param p:
+		@param e:
+		@return:
+		'''
+		return cls(p, e.p1, e.p2)
+
+	def get_outer_circle(self):
+		if self.outer_circle is None:
+			# v1, v2, v3 = self.get_point_list()
+			# x1, y1 = v1
+			# x2, y2 = v2
+			# x3, y3 = v3
+			# absy1y2 = abs(y1 - y2)
+			# absy2y3 = abs(y2 - y3)
+			#
+			# # 这种情况三点共线，无法生成外接圆
+			# if absy1y2 < EPSION and absy2y3 < EPSION:
+			# 	return
+			#
+			# # 第一种情况， v1和v2基本水平
+			# if absy1y2 < EPSION:
+			# 	m2 = -(x3 - x2) / (y3 - y2)
+			# 	mx2 = (x2 + x3) / 2
+			# 	my2 = (y2 + y3) / 2
+			# 	xc = (x2 + x1) / 2
+			# 	yc = m2 * (xc - mx2) + my2
+			# # 第二种情况: v2和v3基本水平
+			# elif absy2y3 < EPSION:
+			# 	m1 = -(x2 - x1) / (y2 - y1)
+			# 	mx1 = (x1 + x2) / 2
+			# 	my1 = (y1 + y2) / 2
+			# 	xc = (x2 + x3) / 2
+			# 	yc = m1 * (xc - mx1) + my1
+			# # 情况三：
+			# else:
+			# 	m1 = -(x2 - x1) / (y2 - y1)
+			# 	m2 = -(x3 - x2) / (y3 - y2)
+			# 	mx1 = (x1 + x2) / 2
+			# 	mx2 = (x2 + x3) / 2
+			# 	my1 = (y1 + y2) / 2
+			# 	my2 = (y2 + y3) / 2
+			# 	xc = (m1 * mx1 - m2 * mx2 + my2 - my1) / (m1 - m2)
+			# 	# y1y2 之间差距更大，更不容易出现直线非常靠近垂直的状况，靠近垂直线意味着斜率很大，这样相乘的话误差可能会比较极端
+			# 	yc = m1 * (xc - mx1) + my1 if (absy1y2 > absy2y3) else m2 * (xc - mx2) + my2
+			#
+			# dx = x2 - xc
+			# dy = y2 - yc
+			# return Circle(Point(xc, yc), math.sqrt(dx * dx + dy * dy))
+			p1 ,p2, p3 = self.p1, self.p2, self.p3
+			r = Calculate.cal_3_determinant([1, p1.x, p1.y], [1, p2.x, p2.y], [1, p3.x, p3.y]) * 2
+			if r == 0:
+				print [1, p1.x, p1.y], [1, p2.x, p2.y], [1, p3.x, p3.y]
+			x = Calculate.cal_3_determinant([1, p1.get_square(), p1.y],
+								  [1, p2.get_square(), p2.y],
+								  [1, p3.get_square(), p3.y]) / r
+			y = Calculate.cal_3_determinant([1, p1.x, p1.get_square()],
+								  [1, p2.x, p2.get_square()],
+								  [1, p3.x, p3.get_square()]) / r
+			abc = 1
+			for i in self.get_edge_list():
+				abc *= i.get_length()
+			s = abs(r)
+			self.outer_circle = Circle(Point(x, y), abc / s)
+		return self.outer_circle
+
+	def is_connect(self, other):
+		a = set()
+		a.update(self.get_point_list())
+		a.update(other.get_point_list())
+		if len(a) < 6:
+			return True
+		return False
+
+	def get_point_list(self):
+		return (self.p1, self.p2, self.p3)
+
+	def get_edge_list(self):
+		return self.line_list
+
+	def is_point_inner_triangle(self, p):
+		line_1 = Edge(self.p1, self.p2)
+		line_2 = Edge(self.p2, self.p3)
+		line_3 = Edge(self.p3, self.p1)
+		return line_1.is_point_right(p) == line_2.is_point_right(p) == line_3.is_point_right(p) != 0
+
+	def is_point_inner_circum_circle(self, p):
+		'''
+		是否在外接圆内
+		@param p:第四点
+		@return:-1在圆内，0在圆上，1在圆外
+		'''
+		p1 = self.p1
+		p2 = self.p2
+		p3 = self.p3
+		i = Calculate.get_instance()
+		x1s_y1s = p1.get_square()
+		x2s_y2s = p2.get_square()
+		x3s_y3s = p3.get_square()
+		x4s_y4s = p.get_square()
+		res = - Calculate.cal_3_determinant([p2.x, p2.y, x2s_y2s], [p3.x, p3.y, x3s_y3s], [p.x, p.y, x4s_y4s]) \
+		+ Calculate.cal_3_determinant([p1.x, p1.y, x1s_y1s], [p3.x, p3.y, x3s_y3s], [p.x, p.y, x4s_y4s])\
+		- Calculate.cal_3_determinant([p1.x, p1.y, x1s_y1s], [p2.x, p2.y, x2s_y2s], [p.x, p.y, x4s_y4s])\
+		+ Calculate.cal_3_determinant([p1.x, p1.y, x1s_y1s], [p2.x, p2.y, x2s_y2s], [p3.x, p3.y, x3s_y3s])
+		if res == 0:
+			return 0
+		return 1 if res > 0 else -1
+
+class Circle(object):
+	def __init__(self, center, radius):
+		self.center = center
+		self.radius = radius
+		self.radius_square = radius * radius
+
+	def __iter__(self):
+		return (i for i in (self.center.x, self.center.y, self.radius))
+
+	def __str__(self):
+		return "Center(%s, %s)" % (self.center, self.radius)
+
+	def is_point_outer(self, p):
+		delta_x = p.x - self.center.x
+		delta_y = p.y - self.center.y
+		instance = Calculate.get_instance()
+		return instance[(delta_x, delta_x)] + instance[(delta_y, delta_y)] > self.radius_square
+
+	def is_point_outer_right(self, p):
+		if not self.is_point_outer(p):
+			return PointIsInner
+		return PointIsOuterNotRight if self.center.x + self.radius > p.x else PointIsOuterRight
+
+class Delaunay(object):
+	def __init__(self, vertices):
+		self.vertices = vertices
+		self.super_triangle = None
+		self.triangle_set = None
+
+	def get_all_triangle(self):
+		'''
+		获得三角网
+		@return:
+		'''
+		if self.triangle_set is None:
+			self.build_begin()
+		si = self.super_triangle.is_connect
+		r = []
+		for triangle in self.triangle_set:
+			if si(triangle):
+				continue
+			r.append(triangle)
+		return r
+
+	def get_super_triangle(self):
+		if self.super_triangle is None:
+			min_x = max_x = self.vertices[0].x
+			min_y = max_y = self.vertices[0].y
+			for p in self.vertices[1:]:
+				if p.x < min_x:
+					min_x = p.x
+				if p.x > max_x:
+					max_x = p.x
+				if p.y < min_y:
+					min_y = p.y
+				if p.y > max_y:
+					max_y = p.y
+
+			delta_x = max_x - min_x
+			delta_y = max_y - min_y
+			half_delta_x = delta_x / 2
+
+			self.super_triangle = Triangle(Point(min_x - half_delta_x - 1, min_y - 1),
+						Point(max_x + half_delta_x + 1, min_y - 1),
+						Point(min_x + half_delta_x, max_y + delta_y + 1))
+		return self.super_triangle
+
+	def build_begin(self):
+		'''
+		构建三角网
+		@return:
+		'''
+		# 初始化顶点列表，从小到大排序
+		vertices = sorted(self.vertices)
+		temp_triangle_list = []
+		self.triangle_set = set()
+		# 超级三角形
+		super_triangle = self.get_super_triangle()
+		# 将超级三角形保存至未确定三角形列表temp_triangle_list和已确定triangle_set
+		self.triangle_set.add(super_triangle)
+		temp_triangle_list.append(super_triangle)
+		# 遍历每一个点
+		for p in vertices:
+			# 初始化edge缓存
+			edge_buffer = set()
+			# 初始化重复edge缓存
+			repeat_edge = set()
+			# 遍历未确定的每一个三角形
+			for temp_triangle in reversed(temp_triangle_list):
+				# 取得外接圆
+				outer_circle = temp_triangle.get_outer_circle()
+				# 点圆关系
+				r = outer_circle.is_point_outer_right(p)
+				if r == PointIsOuterRight:
+					# 若在圆外，点和圆到x轴的投影不相交且在右边
+					# 符合狄罗妮三角，加入到 triangle_set
+					self.triangle_set.add(temp_triangle)
+					temp_triangle_list.remove(temp_triangle)
+					continue
+				elif r == PointIsOuterNotRight:
+					# 不在圆内
+					continue
+				else:
+					# 圆内
+					for e in temp_triangle.get_edge_list():
+						# 把边加入到 edge_buffer 中待构建三角形
+						if e not in edge_buffer:
+							edge_buffer.add(e)
+						else:
+							repeat_edge.add(e)
+					# temp_triangle_list 中去掉 temp_triangle
+					temp_triangle_list.remove(temp_triangle)
+			for edge in edge_buffer:
+				if edge in repeat_edge:
+					print edge
+					continue
+				if edge.is_collinear(p):
+					# 共线
+					continue
+				# edge和p构建三角形
+				temp_triangle_list.append(Triangle.from_vertex_and_edge(edge, p))
+
+		# temp_triangle_list 加入到 triangle_set 中
+		self.triangle_set.update(temp_triangle_list)
+
+
+class Calculate(object):
+	instance = None
+	def __init__(self):
+		self.multi_dict = {}
+
+	def __setitem__(self, key, value):
+		self.multi_dict[key] = value
+
+	def __getitem__(self, args):
+		if args not in self.multi_dict:
+			multi_res = 1
+			for i in args:
+				multi_res *= i
+			self.multi_dict[args] = multi_res
+		return self.multi_dict[args]
+
+	@classmethod
+	def get_instance(cls):
+		if cls.instance is None:
+			cls.instance = cls()
+		return cls.instance
+
+	@classmethod
+	def cal_3_determinant(cls, l0, l1, l2):
+		instance = cls.get_instance()
+		key = tuple(l0 + l1 + l2)
+		if key not in instance.multi_dict:
+			res = instance[(l0[0], l1[1], l2[2])] \
+				  + instance[(l0[1], l1[2], l2[0])] \
+				  + instance[(l0[2], l1[0], l2[1])] \
+				  - instance[(l0[0], l1[2], l2[1])] \
+				  - instance[(l0[1], l1[0], l2[2])] \
+				  - instance[(l0[2], l1[1], l2[0])]
+			instance.multi_dict[key] = res
+		return instance.multi_dict[key]
+
+
+if __doc__ is not True:
+	PointIsInner = 0
+	PointIsOuterNotRight = 1
+	PointIsOuterRight = 2
+
+
+if __name__ == '__main__':
+
+	point_list = set()
+	width, height = 600, 600
+	for i in range(10):
+		point_list.add(Point(random.randint(100, 500), random.randint(100, 500)))
+	d = Delaunay(list(point_list))
+
+	im = Image.new("RGB", (width, height), (255, 255, 255))
+	draw = ImageDraw.Draw(im)
+	r = d.get_all_triangle()
+	for t in r:
+		draw.polygon([(t.p1.x, t.p1.y), (t.p2.x, t.p2.y), (t.p3.x, t.p3.y)], outline='black')
+
+	im.show()
